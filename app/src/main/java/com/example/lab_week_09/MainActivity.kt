@@ -24,6 +24,7 @@ import androidx.navigation.navArgument
 import com.example.lab_week_09.ui.theme.*
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
+import com.squareup.moshi.JsonClass
 import android.util.Base64
 
 class MainActivity : ComponentActivity() {
@@ -43,7 +44,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-//Declare a data class called Student
+//Declare a data class called Student with Moshi annotation
+@JsonClass(generateAdapter = true)
 data class Student(
     val name: String
 )
@@ -52,9 +54,6 @@ data class Student(
 //This will be the root composable of the app
 @Composable
 fun App(navController: NavHostController) {
-    // Create shared state for passing data
-    var sharedStudentList by remember { mutableStateOf<List<Student>>(emptyList()) }
-
     //Here, we use NavHost to create a navigation graph
     NavHost(
         navController = navController,
@@ -63,14 +62,34 @@ fun App(navController: NavHostController) {
         //Here, we create a route called "home"
         composable("home") {
             Home { studentList ->
-                sharedStudentList = studentList
-                navController.navigate("resultContent")
+                // Convert list to JSON using Moshi
+                val moshi = Moshi.Builder().build()
+                val adapter = moshi.adapter<List<Student>>(
+                    Types.newParameterizedType(List::class.java, Student::class.java)
+                )
+                val jsonString = adapter.toJson(studentList)
+
+                // Encode JSON to Base64 to safely pass via URL
+                val encodedJson = Base64.encodeToString(
+                    jsonString.toByteArray(),
+                    Base64.URL_SAFE or Base64.NO_WRAP
+                )
+
+                navController.navigate("resultContent/$encodedJson")
             }
         }
 
         //Here, we create a route called "resultContent"
-        composable("resultContent") {
-            ResultContent(studentList = sharedStudentList)
+        composable(
+            route = "resultContent/{listData}",
+            arguments = listOf(
+                navArgument("listData") {
+                    type = NavType.StringType
+                }
+            )
+        ) { backStackEntry ->
+            val encodedJson = backStackEntry.arguments?.getString("listData") ?: ""
+            ResultContent(listDataJson = encodedJson)
         }
     }
 }
@@ -99,7 +118,7 @@ fun Home(
             inputField = Student(name = input)
         },
         onButtonClick = {
-            // Validation: only add if input is not blank
+            // ASSIGNMENT 1: Validation - only add if input is not blank
             if (inputField.name.isNotBlank()) {
                 listData.add(inputField)
                 inputField = Student("")
@@ -191,8 +210,28 @@ fun HomeContent(
 }
 
 //Here, we create a composable function called ResultContent
+//ASSIGNMENT 2 (BONUS): Parse JSON and display with LazyColumn
 @Composable
-fun ResultContent(studentList: List<Student>) {
+fun ResultContent(listDataJson: String) {
+    // Decode Base64 and parse JSON back to List<Student>
+    val studentList = remember(listDataJson) {
+        try {
+            val decodedJson = String(
+                Base64.decode(listDataJson, Base64.URL_SAFE or Base64.NO_WRAP)
+            )
+
+            val moshi = Moshi.Builder().build()
+            val adapter = moshi.adapter<List<Student>>(
+                Types.newParameterizedType(List::class.java, Student::class.java)
+            )
+
+            adapter.fromJson(decodedJson) ?: emptyList()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
     // Display with LazyColumn
     LazyColumn(
         modifier = Modifier
